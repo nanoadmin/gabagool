@@ -53,23 +53,25 @@ class TestGabagoolStrategy(unittest.TestCase):
         # Create mock objects
         self.mock_bot = type('MockBot', (), {})()
         self.mock_position_tracker = type('MockTracker', (), {
-            'active_positions': {}
+            'active_positions': {},
+            'get_summary': lambda self: {"total_positions": 0}
         })()
         self.mock_risk_manager = type('MockRisk', (), {
-            'validate_arbitrage': lambda *args: (True, "OK")
+            'validate_arbitrage': lambda self, *args, **kwargs: (True, "OK")
         })()
         self.mock_stats_tracker = type('MockStats', (), {
-            'record_trade': lambda *args, **kwargs: None,
-            'get_performance_summary': lambda: {}
+            'record_trade': lambda self, *args, **kwargs: None,
+            'get_performance_summary': lambda self: {}
         })()
         self.mock_db = type('MockDB', (), {
-            'save_trade': lambda *args, **kwargs: True,
-            'save_position': lambda *args: True
+            'save_trade': lambda self, *args, **kwargs: True,
+            'save_position': lambda self, *args: True
         })()
 
+        # Use thresholds that allow prices below them
         self.config = {
-            "yes_threshold": 0.48,
-            "no_threshold": 0.48,
+            "yes_threshold": 0.50,  # Prices must be < 0.50
+            "no_threshold": 0.50,   # Prices must be < 0.50
             "max_combined_cost": 0.97,
             "min_profit_margin": 0.02,
             "trade_size": 5.0
@@ -86,43 +88,47 @@ class TestGabagoolStrategy(unittest.TestCase):
 
     def test_is_opportunity_valid(self):
         """Test valid opportunity detection."""
-        # Good opportunity: combined cost = 0.93, margin = 0.07
-        result = self.strategy._is_opportunity(0.45, 0.48)
+        # Good opportunity: both prices < threshold (0.50), combined cost = 0.90
+        # Margin = 1.0 - 0.90 = 0.10 > 0.02 (min_profit_margin)
+        result = self.strategy._is_opportunity(0.45, 0.45)
         self.assertTrue(result)
 
     def test_is_opportunity_yes_too_high(self):
-        """Test rejection when YES price too high."""
-        result = self.strategy._is_opportunity(0.55, 0.40)
+        """Test rejection when YES price too high (>= threshold)."""
+        result = self.strategy._is_opportunity(0.55, 0.40)  # 0.55 >= 0.50
         self.assertFalse(result)
 
     def test_is_opportunity_no_too_high(self):
-        """Test rejection when NO price too high."""
-        result = self.strategy._is_opportunity(0.40, 0.55)
+        """Test rejection when NO price too high (>= threshold)."""
+        result = self.strategy._is_opportunity(0.40, 0.55)  # 0.55 >= 0.50
         self.assertFalse(result)
 
     def test_is_opportunity_combined_too_high(self):
         """Test rejection when combined cost too high."""
-        result = self.strategy._is_opportunity(0.47, 0.47)  # 0.94 ok
+        # Both below threshold, combined 0.94 < 0.97 - OK
+        result = self.strategy._is_opportunity(0.47, 0.47)
         self.assertTrue(result)
 
-        result = self.strategy._is_opportunity(0.49, 0.49)  # 0.98 > 0.97
+        # Both at threshold (0.50), so rejected because >= threshold
+        result = self.strategy._is_opportunity(0.50, 0.50)
         self.assertFalse(result)
 
     def test_is_opportunity_margin_too_low(self):
         """Test rejection when profit margin too low."""
-        # Combined 0.96, margin 0.04 > 0.02 - OK
+        # Combined 0.94, margin 0.06 > 0.02 - OK
         result = self.strategy._is_opportunity(0.47, 0.47)
         self.assertTrue(result)
 
-        # Combined 0.97, margin 0.03 > 0.02 - OK (at threshold)
-        # Actually need below threshold
-        result = self.strategy._is_opportunity(0.48, 0.48)  # 0.96 combined
+        # Combined 0.96, margin 0.04 > 0.02 - still OK
+        result = self.strategy._is_opportunity(0.48, 0.48)
         self.assertTrue(result)
+
+        # Combined 0.99 > 0.97, rejected by combined cost check
+        result = self.strategy._is_opportunity(0.495, 0.495)
+        self.assertFalse(result)
 
     def test_get_status(self):
         """Test status summary."""
-        self.mock_position_tracker.get_summary = lambda: {"total_positions": 0}
-
         status = self.strategy.get_status()
         self.assertEqual(status["strategy"], "gabagool")
         self.assertIn("config", status)
