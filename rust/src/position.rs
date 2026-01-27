@@ -265,6 +265,38 @@ impl PositionTracker {
         }
     }
 
+    /// Get all positions as a list of dicts
+    pub fn get_all_positions<'py>(&self, py: Python<'py>) -> PyResult<PyObject> {
+        let positions = self.positions.clone();
+
+        let result = py.allow_threads(|| {
+            let rt = tokio::runtime::Runtime::new().unwrap();
+            rt.block_on(async {
+                let guard = positions.read().await;
+                guard.values().cloned().collect::<Vec<_>>()
+            })
+        });
+
+        let list = pyo3::types::PyList::empty(py);
+        for pos in result {
+            let dict = pyo3::types::PyDict::new(py);
+            dict.set_item("market_id", &pos.market_id)?;
+            dict.set_item("yes_shares", pos.yes.shares.to_string())?;
+            dict.set_item("yes_cost", pos.yes.cost.to_string())?;
+            dict.set_item("no_shares", pos.no.shares.to_string())?;
+            dict.set_item("no_cost", pos.no.cost.to_string())?;
+            dict.set_item("gas_paid", pos.gas_paid.to_string())?;
+            dict.set_item("total_cost", pos.total_cost().to_string())?;
+            dict.set_item("matched_shares", pos.matched_shares().to_string())?;
+            dict.set_item("guaranteed_profit", pos.guaranteed_profit().to_string())?;
+            dict.set_item("has_complete_pair", pos.has_complete_pair())?;
+            dict.set_item("settled", pos.settled)?;
+            list.append(dict)?;
+        }
+
+        Ok(list.into())
+    }
+
     /// Get total realized P&L
     pub fn get_total_pnl<'py>(&self, py: Python<'py>) -> PyResult<f64> {
         let pnl = self.total_realized_pnl.clone();

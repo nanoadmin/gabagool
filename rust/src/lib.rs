@@ -55,14 +55,18 @@
 use pyo3::prelude::*;
 
 // Module declarations
+mod data_collector;
 mod execution;
 mod position;
+mod storage;
 mod strategy;
 mod ws_handler;
 
 // Re-export types for internal use
+pub use data_collector::DataCollector;
 pub use execution::OrderExecutor;
 pub use position::PositionTracker;
+pub use storage::DataStorage;
 pub use strategy::GabagoolStrategy;
 pub use ws_handler::PriceFeedCache;
 
@@ -82,11 +86,15 @@ fn gabagool_rust(m: &Bound<'_, PyModule>) -> PyResult<()> {
     // Health check function
     m.add_function(wrap_pyfunction!(health_check, m)?)?;
 
-    // Register classes
+    // Register classes - Hot Path Components
     m.add_class::<ws_handler::PriceFeedCache>()?;
     m.add_class::<strategy::GabagoolStrategy>()?;
     m.add_class::<execution::OrderExecutor>()?;
     m.add_class::<position::PositionTracker>()?;
+
+    // Register classes - Data Collection Pipeline
+    m.add_class::<storage::DataStorage>()?;
+    m.add_class::<data_collector::DataCollector>()?;
 
     Ok(())
 }
@@ -94,7 +102,7 @@ fn gabagool_rust(m: &Bound<'_, PyModule>) -> PyResult<()> {
 /// Health check to verify module is loaded and working
 #[pyfunction]
 fn health_check() -> PyResult<String> {
-    Ok("gabagool_rust v0.1.0 - OK (4 components: PriceFeedCache, GabagoolStrategy, OrderExecutor, PositionTracker)".to_string())
+    Ok("gabagool_rust v0.1.0 - OK (6 components: PriceFeedCache, GabagoolStrategy, OrderExecutor, PositionTracker, DataStorage, DataCollector)".to_string())
 }
 
 #[cfg(test)]
