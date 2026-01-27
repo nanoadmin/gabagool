@@ -12,36 +12,36 @@ Modified: 2026-01-26
 
 Source:
     Based on: samples/lorine93s-mm/src/services/auto_redeem.py
-    Key patterns to extract:
-        - Market resolution detection
-        - Automated redemption execution
-        - Stats integration
+    Uses Polymarket Data API for redeemable position checks.
 
 Dependencies:
     - asyncio
+    - aiohttp
     - logging
 
 Usage:
     from src.auto_redeem import AutoRedeemer
 
-    redeemer = AutoRedeemer(bot, position_tracker, stats_tracker)
+    redeemer = AutoRedeemer(wallet_address, position_tracker, stats_tracker)
 
     # Run as background task
     task = asyncio.create_task(redeemer.run_continuous())
 
     # Or check once
-    await redeemer.check_and_redeem()
+    redeemed = await redeemer.check_and_redeem()
 
 Notes:
     - Polls every 5 minutes by default
-    - Automatically calculates realized profit
-    - Updates position tracker and stats tracker
+    - Uses Polymarket Data API for position queries
+    - Updates position tracker and stats tracker on redemption
 """
 
 import asyncio
 import logging
 from datetime import datetime
-from typing import Optional, Tuple, Any
+from typing import Optional, List, Dict, Any
+
+import aiohttp
 
 
 class AutoRedeemer:
@@ -49,174 +49,194 @@ class AutoRedeemer:
     Automated position redemption service.
 
     Based on lorine93s/polymarket-market-maker-bot auto_redeem.py.
-    Detects settled markets and redeems winning positions.
+    Checks for redeemable positions via Polymarket Data API and redeems them.
     """
+
+    # Polymarket Data API endpoints
+    DATA_API_URL = "https://data-api.polymarket.com"
 
     def __init__(
         self,
-        bot: Any,
-        position_tracker: Any,
-        stats_tracker: Any,
-        check_interval: int = 300  # 5 minutes
+        wallet_address: str,
+        position_tracker: Any = None,
+        stats_tracker: Any = None,
+        check_interval: int = 300,  # 5 minutes
+        redeem_threshold_usd: float = 0.10,  # Minimum value to redeem
+        enabled: bool = True
     ):
         """
         Initialize auto-redeemer.
 
         Args:
-            bot: TradingBot instance for API calls
-            position_tracker: PositionTracker instance
-            stats_tracker: StatsTracker instance
+            wallet_address: Polymarket wallet address to check positions for
+            position_tracker: Optional PositionTracker instance
+            stats_tracker: Optional StatsTracker instance
             check_interval: Seconds between checks (default 300)
+            redeem_threshold_usd: Minimum USD value to trigger redemption
+            enabled: Whether auto-redemption is enabled
         """
-        self.bot = bot
+        self.wallet_address = wallet_address
         self.position_tracker = position_tracker
         self.stats_tracker = stats_tracker
         self.check_interval = check_interval
+        self.redeem_threshold_usd = redeem_threshold_usd
+        self.enabled = enabled
+
         self.logger = logging.getLogger("auto_redeemer")
         self.running = False
+        self._session: Optional[aiohttp.ClientSession] = None
+
+    async def _get_session(self) -> aiohttp.ClientSession:
+        """Get or create HTTP session."""
+        if self._session is None or self._session.closed:
+            self._session = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30))
+        return self._session
+
+    async def close(self) -> None:
+        """Close HTTP session."""
+        if self._session and not self._session.closed:
+            await self._session.close()
+            self._session = None
+
+    async def get_redeemable_positions(self) -> List[Dict[str, Any]]:
+        """
+        Query Polymarket Data API for redeemable positions.
+
+        Returns:
+            List of redeemable position dicts
+        """
+        try:
+            session = await self._get_session()
+            url = f"{self.DATA_API_URL}/positions"
+            params = {
+                "user": self.wallet_address,
+                "redeemable": "true"
+            }
+
+            async with session.get(url, params=params) as response:
+                if response.status == 200:
+                    positions = await response.json()
+                    self.logger.debug("Found %d redeemable positions", len(positions))
+                    return positions
+                else:
+                    self.logger.warning(
+                        "Failed to get redeemable positions: HTTP %d",
+                        response.status
+                    )
+                    return []
+
+        except Exception as e:
+            self.logger.error("Error checking redeemable positions: %s", e)
+            return []
+
+    async def get_all_positions(self) -> List[Dict[str, Any]]:
+        """
+        Get all positions for the wallet.
+
+        Returns:
+            List of position dicts
+        """
+        try:
+            session = await self._get_session()
+            url = f"{self.DATA_API_URL}/positions"
+            params = {"user": self.wallet_address}
+
+            async with session.get(url, params=params) as response:
+                if response.status == 200:
+                    return await response.json()
+                return []
+
+        except Exception as e:
+            self.logger.error("Error getting positions: %s", e)
+            return []
+
+    async def redeem_position(self, position_id: str) -> bool:
+        """
+        Attempt to redeem a specific position.
+
+        Note: This requires the Polymarket API to support redemption.
+        Currently this is a placeholder that logs the redemption attempt.
+
+        Args:
+            position_id: Position ID to redeem
+
+        Returns:
+            True if redemption was successful
+        """
+        try:
+            # Note: Direct API redemption may not be available
+            # Redemption typically requires on-chain transaction
+            self.logger.info("Attempting to redeem position: %s", position_id)
+
+            # For now, just log the attempt
+            # Full implementation would require web3 transaction
+            self.logger.warning(
+                "Redemption API not implemented - position %s needs manual redemption",
+                position_id
+            )
+            return False
+
+        except Exception as e:
+            self.logger.error("Redemption failed for %s: %s", position_id, e)
+            return False
 
     async def check_and_redeem(self) -> int:
         """
-        Check all active positions for settlements.
-        Redeem positions and calculate realized profit.
+        Check for redeemable positions and attempt to redeem them.
 
         Returns:
-            Number of positions redeemed
+            Number of positions processed
         """
-        redeemed_count = 0
-        complete_pairs = self.position_tracker.get_complete_pairs()
+        if not self.enabled:
+            return 0
 
-        for position in complete_pairs:
-            if position.resolved:
-                continue  # Already processed
+        redeemable = await self.get_redeemable_positions()
+        processed = 0
 
-            # Check if market is resolved
-            is_resolved, winning_side = await self.check_market_resolved(
-                position.market_id
-            )
+        for position in redeemable:
+            try:
+                position_id = position.get("id", "")
+                value_usd = float(position.get("value", 0))
+                market_slug = position.get("slug", "unknown")
 
-            if is_resolved:
-                profit = await self.redeem_position(position, winning_side)
-                if profit is not None:
-                    redeemed_count += 1
-
-        if redeemed_count > 0:
-            self.logger.info("Redeemed %d positions", redeemed_count)
-
-        return redeemed_count
-
-    async def check_market_resolved(
-        self,
-        market_id: str
-    ) -> Tuple[bool, Optional[str]]:
-        """
-        Query Polymarket API to check if market is resolved.
-
-        Args:
-            market_id: Market identifier
-
-        Returns:
-            Tuple of (is_resolved, winning_side)
-            winning_side is 'YES' or 'NO' or None if not resolved
-        """
-        try:
-            market_info = await self.bot.get_market_info(market_id)
-
-            if not market_info:
-                return False, None
-
-            is_closed = market_info.get("closed", False)
-            is_resolved = market_info.get("resolved", False)
-
-            if is_closed and is_resolved:
-                # Determine winning outcome
-                # This depends on how Polymarket reports resolution
-                winning_outcome = market_info.get("winning_outcome")
-
-                if winning_outcome is not None:
-                    # Convert to YES/NO
-                    winning_side = "YES" if winning_outcome else "NO"
-                    self.logger.info(
-                        "Market %s resolved: %s wins",
-                        market_id[:16], winning_side
+                # Skip positions below threshold
+                if value_usd < self.redeem_threshold_usd:
+                    self.logger.debug(
+                        "Skipping %s (value $%.2f < threshold $%.2f)",
+                        market_slug, value_usd, self.redeem_threshold_usd
                     )
-                    return True, winning_side
-
-            return False, None
-
-        except Exception as e:
-            self.logger.error("Error checking market resolution: %s", e)
-            return False, None
-
-    async def redeem_position(
-        self,
-        position: Any,
-        winning_side: str
-    ) -> Optional[float]:
-        """
-        Redeem settled position and calculate profit.
-
-        Args:
-            position: ArbitragePosition object
-            winning_side: 'YES' or 'NO'
-
-        Returns:
-            Realized profit in USD, or None if failed
-        """
-        try:
-            self.logger.info(
-                "Redeeming position: %s | Winner: %s",
-                position.market_id[:16], winning_side
-            )
-
-            # For gabagool arbitrage, we always profit (both sides held)
-            # Profit = 1.0 - combined_avg_cost per pair
-            pairs = position.total_pairs
-            profit_per_pair = position.guaranteed_profit_per_pair
-            total_profit = profit_per_pair * pairs
-
-            # Execute redemption on Polymarket
-            success = await self.bot.redeem_position(
-                position.yes_token_id,
-                position.no_token_id,
-                pairs
-            )
-
-            if success:
-                # Mark position as resolved
-                self.position_tracker.mark_resolved(
-                    position.market_id,
-                    profit=total_profit
-                )
-
-                # Update stats tracker
-                self.stats_tracker.update_trade_result(
-                    position.market_id,
-                    "success",
-                    total_profit
-                )
+                    continue
 
                 self.logger.info(
-                    "Position redeemed: %s | Pairs: %.2f | Profit: $%.4f",
-                    position.market_id[:16], pairs, total_profit
+                    "Found redeemable position: %s | Value: $%.2f",
+                    market_slug, value_usd
                 )
 
-                return total_profit
-            else:
-                self.logger.error(
-                    "Redemption failed for %s", position.market_id[:16]
-                )
-                return None
+                # Attempt redemption
+                success = await self.redeem_position(position_id)
+                if success:
+                    processed += 1
 
-        except Exception as e:
-            self.logger.error("Redemption error: %s", e)
-            self.stats_tracker.update_trade_result(
-                position.market_id,
-                "failed",
-                0.0,
-                notes=str(e)
+                    # Update stats if tracker is available
+                    if self.stats_tracker:
+                        self.stats_tracker.update_trade_result(
+                            position.get("conditionId", market_slug),
+                            "redeemed",
+                            value_usd
+                        )
+
+            except Exception as e:
+                self.logger.error("Error processing position: %s", e)
+
+        if processed > 0:
+            self.logger.info("Redeemed %d positions", processed)
+        elif redeemable:
+            self.logger.info(
+                "Found %d redeemable positions (manual redemption required)",
+                len(redeemable)
             )
-            return None
+
+        return processed
 
     async def run_continuous(self) -> None:
         """
@@ -225,8 +245,8 @@ class AutoRedeemer:
         """
         self.running = True
         self.logger.info(
-            "Auto-redemption service started (interval: %ds)",
-            self.check_interval
+            "Auto-redemption service started (interval: %ds, threshold: $%.2f)",
+            self.check_interval, self.redeem_threshold_usd
         )
 
         while self.running:
@@ -241,9 +261,32 @@ class AutoRedeemer:
                 await asyncio.sleep(60)  # Wait 1 min on error
 
         self.running = False
+        await self.close()
         self.logger.info("Auto-redemption service stopped")
 
     def stop(self) -> None:
         """Stop the continuous redemption service."""
         self.running = False
         self.logger.info("Auto-redemption service stopping...")
+
+    async def get_wallet_value(self) -> float:
+        """
+        Get total value of all positions.
+
+        Returns:
+            Total position value in USD
+        """
+        try:
+            session = await self._get_session()
+            url = f"{self.DATA_API_URL}/value"
+            params = {"user": self.wallet_address}
+
+            async with session.get(url, params=params) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    return float(data.get("value", 0))
+                return 0.0
+
+        except Exception as e:
+            self.logger.error("Error getting wallet value: %s", e)
+            return 0.0

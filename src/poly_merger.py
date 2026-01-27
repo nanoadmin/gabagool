@@ -11,34 +11,73 @@ Created: 2026-01-26
 Modified: 2026-01-26
 
 Source:
-    Based on: samples/warproxxx-maker/
-    Reference files:
-        - poly_data/trading_utils.py
-        - poly_data/polymarket_client.py
-    Key patterns to extract:
-        - Position merging via CTF Exchange
-        - Gas estimation
+    Based on: samples/warproxxx-maker/poly_data/polymarket_client.py
+    Reference: docs/developers/CTF/merge.md
 
 Dependencies:
     - web3
+    - eth-account
     - logging
 
 Usage:
     from src.poly_merger import PositionMerger
 
-    merger = PositionMerger(web3_provider, ctf_exchange_address)
+    merger = PositionMerger(private_key, wallet_address)
+
+    # Check if positions can be merged
     if merger.can_merge_positions(yes_shares, no_shares):
-        await merger.merge_positions(market_id, yes_token_id, no_token_id, amount)
+        # Calculate mergeable amount
+        amount = merger.get_mergeable_amount(yes_shares, no_shares)
+
+        # Merge positions (requires on-chain transaction)
+        result = await merger.merge_positions(condition_id, amount)
+        print(f"Merged: {result.amount_merged}")
 
 Notes:
     - Merging saves ~45% gas vs selling separately
-    - Requires CTF Exchange contract interaction
-    - See warproxxx/poly-maker for full implementation
+    - Requires CTF Exchange contract interaction on Polygon
+    - One unit of YES + one unit of NO = one unit of collateral (USDC)
+    - Gas estimates: Sell x2 = ~120k, Merge = ~65k, Savings = ~45%
 """
 
 import logging
-from typing import Optional
+from typing import Optional, Dict, Any
 from dataclasses import dataclass
+
+
+# Polygon contract addresses (mainnet)
+POLYGON_CONTRACTS = {
+    "conditional_tokens": "0x4D97DCd97eC945f40cF65F87097ACe5EA0476045",
+    "neg_risk_adapter": "0xd91E80cF2E7be2e162c6513ceD06f1dD0dA35296",
+    "usdc": "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174",
+}
+
+# Minimal ABI for mergePositions function
+CONDITIONAL_TOKENS_ABI = [
+    {
+        "inputs": [
+            {"name": "collateralToken", "type": "address"},
+            {"name": "parentCollectionId", "type": "bytes32"},
+            {"name": "conditionId", "type": "bytes32"},
+            {"name": "partition", "type": "uint256[]"},
+            {"name": "amount", "type": "uint256"}
+        ],
+        "name": "mergePositions",
+        "outputs": [],
+        "stateMutability": "nonpayable",
+        "type": "function"
+    },
+    {
+        "inputs": [
+            {"name": "account", "type": "address"},
+            {"name": "id", "type": "uint256"}
+        ],
+        "name": "balanceOf",
+        "outputs": [{"name": "", "type": "uint256"}],
+        "stateMutability": "view",
+        "type": "function"
+    }
+]
 
 
 @dataclass
@@ -59,38 +98,92 @@ class PositionMerger:
     Based on warproxxx/poly-maker implementation.
     Consolidates YES + NO positions into USDC via CTF Exchange.
 
+    How Merging Works:
+        - CTF (Conditional Token Framework) allows "merging" positions
+        - When you hold equal amounts of YES and NO tokens
+        - Calling mergePositions() burns both tokens
+        - Returns the underlying collateral (USDC)
+
     Gas Savings:
         - Selling YES: ~60k gas
         - Selling NO: ~60k gas
+        - Total separate: ~120k gas
         - Merging: ~65k gas
-        - Savings: ~45% ((120k - 65k) / 120k)
+        - Savings: ~55k gas (~45%)
     """
 
     # Gas estimates for calculations
     GAS_PER_SELL = 60000
     GAS_PER_MERGE = 65000
 
+    # USDC has 6 decimals
+    USDC_DECIMALS = 6
+
     def __init__(
         self,
-        web3_provider: Optional[str] = None,
-        ctf_exchange_address: Optional[str] = None
+        private_key: Optional[str] = None,
+        wallet_address: Optional[str] = None,
+        rpc_url: str = "https://polygon-rpc.com",
+        dry_run: bool = True
     ):
         """
         Initialize position merger.
 
         Args:
-            web3_provider: Web3 provider URL (e.g., Polygon RPC)
-            ctf_exchange_address: CTF Exchange contract address
+            private_key: Private key for signing transactions
+            wallet_address: Wallet address (derived from key if not provided)
+            rpc_url: Polygon RPC URL
+            dry_run: If True, simulate transactions without executing
         """
-        self.web3_provider = web3_provider
-        self.ctf_exchange_address = ctf_exchange_address
+        self.private_key = private_key
+        self.wallet_address = wallet_address
+        self.rpc_url = rpc_url
+        self.dry_run = dry_run
         self.logger = logging.getLogger("position_merger")
 
-        # TODO: Initialize Web3 connection
-        # self.w3 = Web3(Web3.HTTPProvider(web3_provider))
-        # self.ctf_contract = self.w3.eth.contract(...)
+        self._web3 = None
+        self._ctf_contract = None
+        self._initialized = False
 
-        self.logger.info("PositionMerger initialized (PLACEHOLDER)")
+        if private_key and not dry_run:
+            self._initialize_web3()
+        else:
+            self.logger.info(
+                "PositionMerger initialized (dry_run=%s, web3=%s)",
+                dry_run, "not initialized" if not private_key else "ready"
+            )
+
+    def _initialize_web3(self) -> bool:
+        """Initialize Web3 connection and contracts."""
+        try:
+            from web3 import Web3
+            from web3.middleware import ExtraDataToPOAMiddleware
+            from eth_account import Account
+
+            self._web3 = Web3(Web3.HTTPProvider(self.rpc_url))
+            self._web3.middleware_onion.inject(ExtraDataToPOAMiddleware, layer=0)
+
+            # Derive address from key if not provided
+            if not self.wallet_address and self.private_key:
+                account = Account.from_key(self.private_key)
+                self.wallet_address = account.address
+
+            # Initialize CTF contract
+            self._ctf_contract = self._web3.eth.contract(
+                address=Web3.to_checksum_address(POLYGON_CONTRACTS["conditional_tokens"]),
+                abi=CONDITIONAL_TOKENS_ABI
+            )
+
+            self._initialized = True
+            self.logger.info("Web3 initialized: %s", self.wallet_address[:10] if self.wallet_address else "N/A")
+            return True
+
+        except ImportError:
+            self.logger.warning("web3 package not installed - merge functionality disabled")
+            return False
+        except Exception as e:
+            self.logger.error("Failed to initialize Web3: %s", e)
+            return False
 
     def can_merge_positions(
         self,
@@ -104,7 +197,7 @@ class PositionMerger:
         Args:
             yes_shares: Number of YES shares
             no_shares: Number of NO shares
-            min_amount: Minimum shares to merge
+            min_amount: Minimum shares to merge (default 0.01)
 
         Returns:
             True if positions can be merged
@@ -130,53 +223,128 @@ class PositionMerger:
         """
         return min(yes_shares, no_shares)
 
+    def get_raw_balance(self, token_id: int) -> int:
+        """
+        Get raw token balance from CTF contract.
+
+        Args:
+            token_id: Token ID to check
+
+        Returns:
+            Raw balance (with decimals, divide by 1e6 for shares)
+        """
+        if not self._initialized:
+            self.logger.warning("Web3 not initialized")
+            return 0
+
+        try:
+            balance = self._ctf_contract.functions.balanceOf(
+                self.wallet_address,
+                token_id
+            ).call()
+            return balance
+        except Exception as e:
+            self.logger.error("Error getting balance: %s", e)
+            return 0
+
     async def merge_positions(
         self,
-        market_id: str,
-        yes_token_id: str,
-        no_token_id: str,
-        amount: float
+        condition_id: str,
+        amount: float,
+        is_neg_risk: bool = False
     ) -> MergeResult:
         """
         Merge YES + NO positions back into USDC.
 
-        This is the reverse of splitting USDC into YES/NO.
-        Merging $1 worth of YES + $1 worth of NO = $1 USDC
-        (minus any fees)
+        This calls the CTF contract's mergePositions function:
+        - Burns equal amounts of YES and NO tokens
+        - Returns USDC collateral to wallet
 
         Args:
-            market_id: Market identifier
-            yes_token_id: YES token contract address
-            no_token_id: NO token contract address
-            amount: Amount to merge (number of pairs)
+            condition_id: Market condition ID (bytes32 hex string)
+            amount: Amount to merge (in shares, not raw)
+            is_neg_risk: Whether this is a negative risk market
 
         Returns:
             MergeResult with status and details
         """
         self.logger.info(
-            "Merging %.4f pairs for market %s",
-            amount, market_id[:16]
+            "Merging %.4f pairs for condition %s (neg_risk=%s)",
+            amount, condition_id[:16] if condition_id else "N/A", is_neg_risk
         )
 
-        # TODO: Implement actual CTF merge transaction
-        # This requires:
-        # 1. Approve CTF Exchange to spend tokens
-        # 2. Call mergePositions on CTF Exchange
-        # 3. Wait for transaction confirmation
-        #
-        # See warproxxx/poly-maker for full implementation
+        # Calculate gas savings estimate
+        gas_estimate = self.estimate_gas_savings(amount)
 
-        self.logger.warning("PLACEHOLDER: Merge not implemented")
+        if self.dry_run:
+            self.logger.info(
+                "DRY RUN: Would merge %.4f pairs, saving ~%d gas",
+                amount, gas_estimate["savings_gas"]
+            )
+            return MergeResult(
+                success=True,
+                amount_merged=amount,
+                gas_used=self.GAS_PER_MERGE,
+                gas_saved_estimate=gas_estimate["savings_gas"],
+                tx_hash="dry_run_" + (condition_id[:8] if condition_id else "test"),
+                error=None
+            )
 
-        return MergeResult(
-            success=False,
-            amount_merged=0,
-            gas_used=0,
-            gas_saved_estimate=0,
-            error="Not implemented - see samples/warproxxx-maker"
-        )
+        if not self._initialized:
+            return MergeResult(
+                success=False,
+                amount_merged=0,
+                gas_used=0,
+                gas_saved_estimate=0,
+                error="Web3 not initialized - call _initialize_web3() first"
+            )
 
-    def estimate_gas_savings(self, amount: float) -> dict:
+        try:
+            from web3 import Web3
+
+            # Convert amount to raw (with 6 decimals for USDC)
+            raw_amount = int(amount * (10 ** self.USDC_DECIMALS))
+
+            # Partition for binary market: [1, 2] (YES=1, NO=2)
+            partition = [1, 2]
+
+            # Build transaction
+            # Note: For neg_risk markets, use NegRiskAdapter instead
+            contract_address = (
+                POLYGON_CONTRACTS["neg_risk_adapter"] if is_neg_risk
+                else POLYGON_CONTRACTS["conditional_tokens"]
+            )
+
+            # This is a simplified example - full implementation would need:
+            # 1. Proper nonce management
+            # 2. Gas price estimation
+            # 3. Transaction signing
+            # 4. Receipt waiting
+
+            self.logger.warning(
+                "Full merge implementation requires web3 transaction signing. "
+                "See samples/warproxxx-maker/poly_merger/merge.js for reference."
+            )
+
+            return MergeResult(
+                success=False,
+                amount_merged=0,
+                gas_used=0,
+                gas_saved_estimate=gas_estimate["savings_gas"],
+                error="Full implementation pending - use poly_merger/merge.js"
+            )
+
+        except Exception as e:
+            self.logger.error("Merge failed: %s", e)
+            return MergeResult(
+                success=False,
+                amount_merged=0,
+                gas_used=0,
+                gas_saved_estimate=0,
+                error=str(e)
+            )
+
+    def estimate_gas_savings(self, amount: float) -> Dict[str, Any]:
         """
         Estimate gas savings from merging vs selling separately.
 
@@ -194,7 +362,7 @@ class PositionMerger:
 
         # Savings
         savings_gas = separate_gas - merge_gas
-        savings_pct = savings_gas / separate_gas
+        savings_pct = savings_gas / separate_gas if separate_gas > 0 else 0
 
         return {
             "separate_sell_gas": separate_gas,
@@ -216,3 +384,35 @@ class PositionMerger:
         print(f"Merge: {est['merge_gas']:,} gas")
         print(f"Savings: {est['savings_gas']:,} gas ({est['savings_percent']:.1%})")
         print("=" * 40 + "\n")
+
+    def should_merge(
+        self,
+        yes_shares: float,
+        no_shares: float,
+        current_gas_price_gwei: float = 30,
+        min_savings_usd: float = 0.01
+    ) -> bool:
+        """
+        Determine if merging is worthwhile given current gas prices.
+
+        Args:
+            yes_shares: Number of YES shares
+            no_shares: Number of NO shares
+            current_gas_price_gwei: Current gas price in gwei
+            min_savings_usd: Minimum savings to justify merge
+
+        Returns:
+            True if merging would save at least min_savings_usd
+        """
+        if not self.can_merge_positions(yes_shares, no_shares):
+            return False
+
+        # Estimate savings
+        est = self.estimate_gas_savings(min(yes_shares, no_shares))
+
+        # Convert gas savings to USD (rough estimate)
+        # Gas price in gwei * gas saved * MATIC price (assume ~$0.50)
+        matic_price_usd = 0.50
+        savings_usd = (current_gas_price_gwei * 1e-9 * est["savings_gas"] * matic_price_usd)
+
+        return savings_usd >= min_savings_usd

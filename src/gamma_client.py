@@ -11,35 +11,38 @@ Created: 2026-01-26
 Modified: 2026-01-26
 
 Source:
-    Based on: samples/discountry-base/
-    Also reference: Polymarket/agents official repo
-    Key patterns to extract:
-        - Gamma API queries
-        - 15-minute market filtering
-        - Market metadata parsing
+    Based on: samples/discountry-base/src/gamma_client.py
+    Key patterns:
+        - Slug-based 15-minute market discovery
+        - Token ID and price parsing
 
 Dependencies:
-    - aiohttp
+    - requests (via ThreadLocalSessionMixin)
     - logging
 
 Usage:
-    from src.gamma_client import GammaClient, find_15min_markets
+    from src.gamma_client import GammaClient
 
     client = GammaClient()
-    markets = await client.get_markets()
-    btc_markets = await find_15min_markets(client, ['BTC'])
+    market = client.get_current_15m_market("BTC")
+    if market:
+        info = client.get_market_info("BTC")
+        print(f"Token IDs: {info['token_ids']}")
+        print(f"Prices: {info['prices']}")
 
 Notes:
     - Gamma API provides market metadata (not trading)
-    - Use for discovering 15-minute markets
-    - Filter by asset (BTC, ETH, SOL)
+    - 15-minute markets use slug pattern: {coin}-updown-15m-{timestamp}
+    - Synchronous client (use asyncio.to_thread for async contexts)
 """
 
+import json
 import logging
-import aiohttp
 from typing import List, Dict, Any, Optional
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
+
+from .http import ThreadLocalSessionMixin
 
 
 @dataclass
@@ -48,11 +51,12 @@ class Market:
     Represents a Polymarket market.
 
     Attributes:
-        id: Market ID
+        id: Market ID (same as slug for 15-min markets)
+        slug: Market slug identifier
         question: Market question/title
         description: Market description
-        yes_token_id: YES token contract address
-        no_token_id: NO token contract address
+        yes_token_id: YES/Up token ID
+        no_token_id: NO/Down token ID
         end_date: When market resolves
         active: Whether market is currently tradeable
         closed: Whether market is closed
@@ -60,6 +64,7 @@ class Market:
         volume: Total trading volume
     """
     id: str
+    slug: str
     question: str
     description: str
     yes_token_id: str
@@ -72,92 +77,200 @@ class Market:
     category: str = ""
 
 
-class GammaClient:
+class GammaClient(ThreadLocalSessionMixin):
     """
     Client for Polymarket Gamma API.
 
-    Provides market discovery and metadata queries.
-    Reference: samples/discountry-base and Polymarket/agents
+    Provides market discovery via slug-based lookups.
+    Reference: samples/discountry-base/src/gamma_client.py
     """
 
-    DEFAULT_URL = "https://gamma-api.polymarket.com"
+    DEFAULT_HOST = "https://gamma-api.polymarket.com"
 
-    def __init__(self, base_url: str = None):
+    # Supported coins and their slug prefixes
+    COIN_SLUGS = {
+        "BTC": "btc-updown-15m",
+        "ETH": "eth-updown-15m",
+        "SOL": "sol-updown-15m",
+        "XRP": "xrp-updown-15m",
+    }
+
+    def __init__(self, host: str = None, timeout: int = 10):
         """
         Initialize Gamma API client.
 
         Args:
-            base_url: API base URL (defaults to production)
+            host: API host URL (defaults to production)
+            timeout: Request timeout in seconds
         """
-        self.base_url = base_url or self.DEFAULT_URL
+        super().__init__()
+        self.host = (host or self.DEFAULT_HOST).rstrip("/")
+        self.timeout = timeout
         self.logger = logging.getLogger("gamma_client")
-        self.session: Optional[aiohttp.ClientSession] = None
 
-    async def connect(self) -> None:
-        """Initialize HTTP session."""
-        self.session = aiohttp.ClientSession()
-
-    async def close(self) -> None:
-        """Close HTTP session."""
-        if self.session:
-            await self.session.close()
-
-    async def get_markets(
-        self,
-        active: bool = True,
-        limit: int = 100
-    ) -> List[Dict[str, Any]]:
+    def get_market_by_slug(self, slug: str) -> Optional[Dict[str, Any]]:
         """
-        Get list of markets.
+        Get market data by slug.
 
         Args:
-            active: Filter to active markets
-            limit: Max markets to return
+            slug: Market slug (e.g., "btc-updown-15m-1766671200")
 
         Returns:
-            List of market dicts
+            Market data dictionary or None if not found
         """
-        # TODO: Implement actual API call
-        # endpoint = f"{self.base_url}/markets"
-        # params = {"active": active, "limit": limit}
-        # async with self.session.get(endpoint, params=params) as resp:
-        #     return await resp.json()
+        url = f"{self.host}/markets/slug/{slug}"
 
-        self.logger.warning("PLACEHOLDER: Get markets not implemented")
-        return []
+        try:
+            response = self.session.get(url, timeout=self.timeout)
+            if response.status_code == 200:
+                return response.json()
+            self.logger.debug("Market %s not found (status %d)", slug, response.status_code)
+            return None
+        except Exception as e:
+            self.logger.error("Error fetching market %s: %s", slug, e)
+            return None
 
-    async def get_market(self, market_id: str) -> Optional[Dict[str, Any]]:
+    def get_current_15m_market(self, coin: str) -> Optional[Dict[str, Any]]:
         """
-        Get single market by ID.
+        Get the current active 15-minute market for a coin.
 
         Args:
-            market_id: Market identifier
+            coin: Coin symbol (BTC, ETH, SOL, XRP)
 
         Returns:
-            Market dict or None
+            Market data for the current 15-minute window, or None
         """
-        # TODO: Implement actual API call
-        self.logger.warning("PLACEHOLDER: Get market not implemented")
+        coin = coin.upper()
+        if coin not in self.COIN_SLUGS:
+            self.logger.error("Unsupported coin: %s. Use: %s", coin, list(self.COIN_SLUGS.keys()))
+            return None
+
+        prefix = self.COIN_SLUGS[coin]
+
+        # Calculate current 15-minute window timestamp
+        now = datetime.now(timezone.utc)
+        minute = (now.minute // 15) * 15
+        current_window = now.replace(minute=minute, second=0, microsecond=0)
+        current_ts = int(current_window.timestamp())
+
+        # Try current window
+        slug = f"{prefix}-{current_ts}"
+        market = self.get_market_by_slug(slug)
+        if market and market.get("acceptingOrders"):
+            self.logger.debug("Found active market: %s", slug)
+            return market
+
+        # Try next window (in case current just ended)
+        next_ts = current_ts + 900  # 15 minutes
+        slug = f"{prefix}-{next_ts}"
+        market = self.get_market_by_slug(slug)
+        if market and market.get("acceptingOrders"):
+            self.logger.debug("Found active market (next window): %s", slug)
+            return market
+
+        # Try previous window (might still be active)
+        prev_ts = current_ts - 900
+        slug = f"{prefix}-{prev_ts}"
+        market = self.get_market_by_slug(slug)
+        if market and market.get("acceptingOrders"):
+            self.logger.debug("Found active market (prev window): %s", slug)
+            return market
+
+        self.logger.warning("No active 15m market found for %s", coin)
         return None
 
-    async def search_markets(
-        self,
-        query: str,
-        active: bool = True
-    ) -> List[Dict[str, Any]]:
+    def parse_token_ids(self, market: Dict[str, Any]) -> Dict[str, str]:
         """
-        Search markets by keyword.
+        Parse token IDs from market data.
 
         Args:
-            query: Search query
-            active: Filter to active markets
+            market: Market data dictionary
 
         Returns:
-            List of matching market dicts
+            Dictionary with "up"/"down" (or "yes"/"no") token IDs
         """
-        # TODO: Implement actual API call
-        self.logger.warning("PLACEHOLDER: Search markets not implemented")
-        return []
+        clob_token_ids = market.get("clobTokenIds", "[]")
+        token_ids = self._parse_json_field(clob_token_ids)
+
+        outcomes = market.get("outcomes", '["Up", "Down"]')
+        outcomes = self._parse_json_field(outcomes)
+
+        return self._map_outcomes(outcomes, token_ids)
+
+    def parse_prices(self, market: Dict[str, Any]) -> Dict[str, float]:
+        """
+        Parse current prices from market data.
+
+        Args:
+            market: Market data dictionary
+
+        Returns:
+            Dictionary with "up"/"down" (or "yes"/"no") prices
+        """
+        outcome_prices = market.get("outcomePrices", '["0.5", "0.5"]')
+        prices = self._parse_json_field(outcome_prices)
+
+        outcomes = market.get("outcomes", '["Up", "Down"]')
+        outcomes = self._parse_json_field(outcomes)
+
+        return self._map_outcomes(outcomes, prices, cast=float)
+
+    @staticmethod
+    def _parse_json_field(value: Any) -> List[Any]:
+        """Parse a field that may be a JSON string or a list."""
+        if isinstance(value, str):
+            try:
+                return json.loads(value)
+            except json.JSONDecodeError:
+                return []
+        return value if isinstance(value, list) else []
+
+    @staticmethod
+    def _map_outcomes(
+        outcomes: List[Any],
+        values: List[Any],
+        cast=lambda v: v
+    ) -> Dict[str, Any]:
+        """Map outcome labels to values with optional casting."""
+        result: Dict[str, Any] = {}
+        for i, outcome in enumerate(outcomes):
+            if i < len(values):
+                try:
+                    result[str(outcome).lower()] = cast(values[i])
+                except (ValueError, TypeError):
+                    pass
+        return result
+
+    def get_market_info(self, coin: str) -> Optional[Dict[str, Any]]:
+        """
+        Get comprehensive market info for current 15-minute market.
+
+        Args:
+            coin: Coin symbol (BTC, ETH, SOL, XRP)
+
+        Returns:
+            Dictionary with market info including token IDs and prices
+        """
+        market = self.get_current_15m_market(coin)
+        if not market:
+            return None
+
+        token_ids = self.parse_token_ids(market)
+        prices = self.parse_prices(market)
+
+        return {
+            "slug": market.get("slug"),
+            "question": market.get("question"),
+            "end_date": market.get("endDate"),
+            "token_ids": token_ids,
+            "prices": prices,
+            "accepting_orders": market.get("acceptingOrders", False),
+            "best_bid": market.get("bestBid"),
+            "best_ask": market.get("bestAsk"),
+            "spread": market.get("spread"),
+            "volume": market.get("volume"),
+            "raw": market,
+        }
 
     def parse_market(self, data: Dict[str, Any]) -> Market:
         """
@@ -171,78 +284,69 @@ class GammaClient:
         """
         # Parse end date if present
         end_date = None
-        if data.get("end_date_iso"):
+        end_date_str = data.get("endDate") or data.get("end_date_iso")
+        if end_date_str:
             try:
                 end_date = datetime.fromisoformat(
-                    data["end_date_iso"].replace("Z", "+00:00")
+                    end_date_str.replace("Z", "+00:00")
                 )
             except (ValueError, TypeError):
                 pass
 
-        # Get token IDs from outcomes
-        outcomes = data.get("outcomes", [])
-        yes_token_id = ""
-        no_token_id = ""
-        if len(outcomes) >= 2:
-            yes_token_id = outcomes[0].get("token_id", "")
-            no_token_id = outcomes[1].get("token_id", "")
+        # Get token IDs
+        token_ids = self.parse_token_ids(data)
+        # Map up/down to yes/no for consistency
+        yes_token_id = token_ids.get("up") or token_ids.get("yes", "")
+        no_token_id = token_ids.get("down") or token_ids.get("no", "")
 
         return Market(
-            id=data.get("id", ""),
+            id=data.get("id", data.get("slug", "")),
+            slug=data.get("slug", ""),
             question=data.get("question", ""),
             description=data.get("description", ""),
             yes_token_id=yes_token_id,
             no_token_id=no_token_id,
             end_date=end_date,
-            active=data.get("active", False),
+            active=data.get("acceptingOrders", False),
             closed=data.get("closed", False),
             resolved=data.get("resolved", False),
-            volume=float(data.get("volume", 0)),
+            volume=float(data.get("volume", 0) or 0),
             category=data.get("category", "")
         )
 
+    def get_all_active_markets(self, coins: List[str] = None) -> List[Market]:
+        """
+        Get all active 15-minute markets for specified coins.
 
-async def find_15min_markets(
-    client: GammaClient,
-    assets: List[str] = None
-) -> List[Market]:
+        Args:
+            coins: List of coin symbols (defaults to all supported)
+
+        Returns:
+            List of Market objects for active markets
+        """
+        if coins is None:
+            coins = list(self.COIN_SLUGS.keys())
+
+        markets = []
+        for coin in coins:
+            market_data = self.get_current_15m_market(coin.upper())
+            if market_data:
+                markets.append(self.parse_market(market_data))
+
+        return markets
+
+
+def find_15min_markets(coins: List[str] = None) -> List[Market]:
     """
-    Find active 15-minute markets for specified assets.
+    Find active 15-minute markets for specified coins.
+
+    Convenience function that creates a client and fetches markets.
 
     Args:
-        client: GammaClient instance
-        assets: List of assets to filter (e.g., ['BTC', 'ETH', 'SOL'])
+        coins: List of coin symbols (e.g., ['BTC', 'ETH', 'SOL'])
 
     Returns:
         List of Market objects for 15-minute markets
     """
-    if assets is None:
-        assets = ["BTC", "ETH", "SOL"]
-
-    markets = []
-
-    for asset in assets:
-        # Search for 15-minute markets
-        # Keywords might be "15 minute", "15-minute", "15min", etc.
-        search_terms = [
-            f"{asset} 15 minute",
-            f"{asset} 15-minute",
-            f"{asset} up down"
-        ]
-
-        for term in search_terms:
-            results = await client.search_markets(term, active=True)
-            for data in results:
-                market = client.parse_market(data)
-                if market.active and not market.closed:
-                    markets.append(market)
-
-    # Deduplicate by market ID
-    seen = set()
-    unique_markets = []
-    for m in markets:
-        if m.id not in seen:
-            seen.add(m.id)
-            unique_markets.append(m)
-
-    return unique_markets
+    client = GammaClient()
+    return client.get_all_active_markets(coins)

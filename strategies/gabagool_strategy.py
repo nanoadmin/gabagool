@@ -37,6 +37,8 @@ import logging
 from typing import Dict, Any, List, Optional
 from dataclasses import dataclass, field
 
+from src.gamma_client import GammaClient, Market
+
 
 @dataclass
 class StrategyConfig:
@@ -52,16 +54,6 @@ class StrategyConfig:
 
     # Target assets
     assets: List[str] = field(default_factory=lambda: ["BTC", "ETH", "SOL"])
-
-
-@dataclass
-class MarketInfo:
-    """Market information for arbitrage scanning."""
-    id: str
-    question: str
-    yes_token_id: str
-    no_token_id: str
-    end_date: str = ""
 
 
 class GabagoolStrategy:
@@ -172,55 +164,25 @@ class GabagoolStrategy:
 
         return executed
 
-    async def _discover_markets(self) -> List[MarketInfo]:
+    async def _discover_markets(self) -> List[Market]:
         """
-        Discover target 15-minute markets.
+        Discover target 15-minute markets via Gamma API.
 
         Returns:
-            List of MarketInfo objects for scanning
+            List of Market objects for scanning
         """
-        markets = []
-
         try:
-            # Search for 15-minute markets for each target asset
-            for asset in self.config.assets:
-                query = f"{asset} 15 minute"
-                results = await asyncio.to_thread(
-                    self.bot.search_markets, query, 10
-                )
-
-                for market_data in results:
-                    # Extract market info
-                    market_id = market_data.get("conditionId", market_data.get("id", ""))
-                    if not market_id:
-                        continue
-
-                    # Get token IDs
-                    tokens = market_data.get("tokens", [])
-                    yes_token = ""
-                    no_token = ""
-
-                    for token in tokens:
-                        outcome = token.get("outcome", "").upper()
-                        token_id = token.get("token_id", "")
-                        if outcome == "YES":
-                            yes_token = token_id
-                        elif outcome == "NO":
-                            no_token = token_id
-
-                    if yes_token and no_token:
-                        markets.append(MarketInfo(
-                            id=market_id,
-                            question=market_data.get("question", ""),
-                            yes_token_id=yes_token,
-                            no_token_id=no_token,
-                            end_date=market_data.get("endDate", "")
-                        ))
+            # Use GammaClient to discover active 15-minute markets
+            gamma_client = GammaClient()
+            markets = await asyncio.to_thread(
+                gamma_client.get_all_active_markets, self.config.assets
+            )
+            self.logger.debug("Discovered %d active markets", len(markets))
+            return markets
 
         except Exception as e:
             self.logger.warning("Market discovery failed: %s", e)
-
-        return markets
+            return []
 
     def _is_opportunity(self, yes_price: float, no_price: float) -> bool:
         """
@@ -253,7 +215,7 @@ class GabagoolStrategy:
 
     async def execute_arbitrage(
         self,
-        market: MarketInfo,
+        market: Market,
         yes_price: float,
         no_price: float
     ) -> bool:
