@@ -1,60 +1,90 @@
 # Gabagool - Current State (2026-01-27)
 
-## Active Process
+## Active Processes
 
 ```bash
-tmux session: gabagool_v4
-Script: scripts/monitor_15m_v4.py
-Status: Running (paper trading mode)
+# Two v5 instances running:
+tmux session: monitor_15m_v5           # Conservative
+tmux session: monitor_15m_v5_aggressive # Aggressive
 ```
 
-## What It Does
+## v5 Strategy: Liquidity-First Stacking
 
-Monitors Polymarket 15-minute crypto prediction markets (BTC, ETH, SOL, XRP) for arbitrage opportunities. When `combined_ask < 1.00`, opens paper trades.
+**Key Innovation**: Zero slippage by design - only trades at BEST ask price level.
 
-## Key Parameters
+v4 Problem: $350 trades caused slippage through order book, turning 1% theoretical profit into 2-3% actual loss.
 
-| Setting | Value |
-|---------|-------|
-| Initial equity | $2,000 |
-| Trade size | $200-$500 (scales with margin) |
-| Daily loss limit | 20% ($400) |
-| Max positions | 4 |
-| Scan interval | 500ms |
-| Data retention | 8 hours (snapshots only) |
+v5 Solution: Trade only what's available at best price (often $5-30), stack multiple small trades.
+
+**Backtest Results**:
+- v4: 8 trades, 1 winner, **-$53.63 PnL**
+- v5: 18 trades, 18 winners, **+$2.59 PnL**
+
+## Running Instances
+
+| Instance | Min Margin | Max Trade | tmux Session |
+|----------|------------|-----------|--------------|
+| `v5` | 0.50% | $100 | `monitor_15m_v5` |
+| `aggressive` | 0.20% | $500 | `monitor_15m_v5_aggressive` |
+
+## Key Parameters (v5)
+
+| Setting | v5 (Conservative) | Aggressive |
+|---------|-------------------|------------|
+| Initial equity | $2,000 | $2,000 |
+| Min margin | 0.50% | 0.20% |
+| Max trade size | $100 | $500 |
+| Max stack/window | 10 | 10 |
+| Gas cost | $0.003/tx | $0.003/tx |
+| Scan interval | 500ms | 500ms |
 
 ## Data Files
 
-**Permanent** (in `data/logs/`):
-- `paper_trades.jsonl` - Trade history
-- `paper_pnl_summary.json` - Equity & stats
-- `opportunities_*.jsonl` - Detected opportunities
+**Per-instance** (in `data/logs/`):
+- `{instance}_paper_trades.jsonl` - Trade history
+- `{instance}_paper_pnl_summary.json` - Equity & stats
 
-**Auto-deleted**:
+**Shared**:
+- `opportunities_*.jsonl` - Detected opportunities
 - `market_snapshots_*.jsonl` - Raw data (8h retention)
 
 ## Quick Commands
 
 ```bash
-# Status
-tmux attach -t gabagool_v4   # Ctrl+B, D to detach
-cat data/logs/paper_pnl_summary.json | jq
+# List sessions
+tmux list-sessions
 
-# Restart
-tmux kill-session -t gabagool_v4
-cd ~/bots/gabagool && tmux new-session -d -s gabagool_v4 \
-  "source .venv/bin/activate && python scripts/monitor_15m_v4.py 2>&1 | tee logs/monitor_v4.log"
+# Attach to session
+tmux attach -t monitor_15m_v5
+tmux attach -t monitor_15m_v5_aggressive
+
+# Check P&L
+cat data/logs/v5_paper_pnl_summary.json | jq
+cat data/logs/aggressive_paper_pnl_summary.json | jq
+
+# Start new instance
+source .venv/bin/activate
+python scripts/monitor_15m_v5.py --instance mytest --fresh --min-margin 0.003
+
+# Kill instance
+tmux kill-session -t monitor_15m_v5
 ```
 
 ## Recent Changes (2026-01-27)
 
-1. Deleted 21GB unused goldsky data
-2. Created monitor_v4 with paper trading
-3. Added equity tracking, position sizing, risk limits
+1. Created monitor_v5 with liquidity-first stacking strategy
+2. Fixed order book parsing bug (API returns asks descending)
+3. Added multi-instance support (--instance, --fresh flags)
+4. Updated gas cost to realistic Polygon estimate ($0.003/tx)
+5. Added Discord webhook for weekly reports
+6. Shut down v4, running two v5 instances
 
-## Next Steps (Pending Discussion)
+## Polygon Gas Analysis
 
-- Re-entry strategies
-- Early exit before resolution
-- Execution delay simulation
-- Leg risk handling refinement
+| Scenario | Per Order | 2 Orders (Arb) |
+|----------|-----------|----------------|
+| Normal | $0.002 | $0.004 |
+| Busy | $0.004 | $0.008 |
+| Config | $0.003 | $0.006 |
+
+Break-even at 1% margin: ~$0.60 trade size
