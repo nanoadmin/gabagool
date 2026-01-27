@@ -803,14 +803,16 @@ class PaperTrader:
 def parse_order_book(raw_book: Any, depth: int) -> OrderBook:
     bids = []
     asks = []
+    # Parse ALL levels first, then sort, then slice to depth
+    # API returns asks in descending price order, we need ascending (best price first)
     if hasattr(raw_book, 'bids') and raw_book.bids:
-        for b in raw_book.bids[:depth]:
-            bids.append(OrderLevel(price=float(b.price), size=float(b.size)))
+        all_bids = [OrderLevel(price=float(b.price), size=float(b.size)) for b in raw_book.bids]
+        all_bids.sort(key=lambda x: x.price, reverse=True)  # Highest first for bids
+        bids = all_bids[:depth]
     if hasattr(raw_book, 'asks') and raw_book.asks:
-        for a in raw_book.asks[:depth]:
-            asks.append(OrderLevel(price=float(a.price), size=float(a.size)))
-    bids.sort(key=lambda x: x.price, reverse=True)
-    asks.sort(key=lambda x: x.price)
+        all_asks = [OrderLevel(price=float(a.price), size=float(a.size)) for a in raw_book.asks]
+        all_asks.sort(key=lambda x: x.price)  # Lowest first for asks
+        asks = all_asks[:depth]
     best_bid = bids[0].price if bids else 0.0
     best_ask = asks[0].price if asks else 1.0
     spread = best_ask - best_bid
