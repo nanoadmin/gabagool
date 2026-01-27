@@ -145,13 +145,16 @@ def get_opportunity_stats() -> dict:
     """Get opportunity statistics from log files."""
     stats = {
         "today_opportunities": 0,
-        "best_margin_today": "N/A"
+        "best_margin_today": "N/A",
+        "best_combined_today": "N/A",
+        "best_combined_coin": "N/A"
     }
 
     try:
         today = datetime.now(timezone.utc).strftime("%Y%m%d")
-        opp_file = LOG_DIR / f"opportunities_{today}.jsonl"
 
+        # Check opportunities file
+        opp_file = LOG_DIR / f"opportunities_{today}.jsonl"
         if opp_file.exists():
             with open(opp_file) as f:
                 opportunities = [json.loads(line) for line in f if line.strip()]
@@ -162,6 +165,37 @@ def get_opportunity_stats() -> dict:
                 best = max(opportunities, key=lambda x: x.get("margin", 0))
                 stats["best_margin_today"] = f"{best.get('margin', 0):.2%}"
                 stats["best_coin"] = best.get("coin", "N/A")
+
+        # Analyze JSONL for best combined (sample last 1000 records for speed)
+        snapshot_file = LOG_DIR / f"market_snapshots_{today}.jsonl"
+        if snapshot_file.exists():
+            best_combined = 2.0
+            best_coin = "N/A"
+
+            # Read last 1000 lines for analysis
+            result = subprocess.run(
+                ["tail", "-1000", str(snapshot_file)],
+                capture_output=True,
+                text=True,
+                timeout=10
+            )
+
+            for line in result.stdout.strip().split("\n"):
+                if not line:
+                    continue
+                try:
+                    data = json.loads(line)
+                    for m in data.get("markets", []):
+                        combined = m.get("combined", {}).get("best_ask", 2.0)
+                        if combined < best_combined:
+                            best_combined = combined
+                            best_coin = m.get("coin", "N/A")
+                except:
+                    pass
+
+            if best_combined < 2.0:
+                stats["best_combined_today"] = f"{best_combined:.3f}"
+                stats["best_combined_coin"] = best_coin
 
     except Exception as e:
         stats["error"] = str(e)
