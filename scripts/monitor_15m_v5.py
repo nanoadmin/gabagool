@@ -675,10 +675,10 @@ class PaperTrader:
             entry_snapshot={
                 'scan_id': full_record.get('scan_id'),
                 'window_seconds_remain': snapshot.remaining_seconds,
-                'execution_sim': exec_sim,
+                'strategy': 'liquidity_first_no_slippage',
                 'margin': margin,
                 'equity_before': self.pnl_summary.current_equity,
-                'position_size_reason': f"margin={margin:.3%} -> ${trade_size}",
+                'position_size_reason': f"best_level_liquidity -> ${trade_size:.2f}",
             }
         )
 
