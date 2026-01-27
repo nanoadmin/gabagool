@@ -1,6 +1,73 @@
 # Gabagool Bot - Operations Runbook
 
-## Daily Operations
+## Monitor v4 (Paper Trading) - CURRENT
+
+### Start Monitor v4
+
+```bash
+cd ~/bots/gabagool
+tmux new-session -d -s gabagool_v4 \
+  "source .venv/bin/activate && python scripts/monitor_15m_v4.py 2>&1 | tee logs/monitor_v4.log"
+```
+
+### Monitor v4 Status
+
+```bash
+# Check if running
+tmux list-sessions | grep gabagool
+
+# View live output
+tmux attach -t gabagool_v4
+# (Ctrl+B then D to detach)
+
+# Tail logs
+tail -f ~/bots/gabagool/logs/monitor_v4.log
+
+# Check P&L summary
+cat ~/bots/gabagool/data/logs/paper_pnl_summary.json | jq
+
+# View paper trades
+tail ~/bots/gabagool/data/logs/paper_trades.jsonl
+
+# View opportunities
+tail ~/bots/gabagool/data/logs/opportunities_*.jsonl
+```
+
+### Stop/Restart Monitor v4
+
+```bash
+# Stop
+tmux kill-session -t gabagool_v4
+
+# Restart
+cd ~/bots/gabagool && tmux new-session -d -s gabagool_v4 \
+  "source .venv/bin/activate && python scripts/monitor_15m_v4.py 2>&1 | tee logs/monitor_v4.log"
+```
+
+### Monitor v4 Configuration
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `--equity` | 2000 | Initial paper equity |
+| `--min-size` | 200 | Min trade size |
+| `--max-size` | 500 | Max trade size |
+| `--max-positions` | 4 | Max concurrent positions |
+| `--daily-loss-limit` | 0.20 | 20% daily loss halt |
+| `--min-margin` | 0.002 | 0.2% min margin to trade |
+| `--retention-hours` | 8 | Auto-delete snapshots after |
+
+### Monitor v4 Data Files
+
+| File | Retention | Purpose |
+|------|-----------|---------|
+| `paper_trades.jsonl` | Permanent | All paper trades |
+| `paper_pnl_summary.json` | Permanent | Equity & P&L stats |
+| `opportunities_*.jsonl` | Permanent | Detected opportunities |
+| `market_snapshots_*.jsonl` | 8 hours | Raw order books |
+
+---
+
+## Legacy: Main Bot (Not Currently Running)
 
 ### Start Bot
 

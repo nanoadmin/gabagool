@@ -45,8 +45,11 @@ except ImportError:
 
 from dotenv import load_dotenv
 
-# Load .env file if present
-load_dotenv()
+# Load .env file if present (check multiple locations)
+# Priority: .env in cwd, then config/.env relative to this file
+_config_dir = Path(__file__).parent.parent / "config"
+load_dotenv(_config_dir / ".env")  # config/.env
+load_dotenv()  # .env in cwd (overrides)
 
 # Environment variable prefix
 ENV_PREFIX = "POLY_"

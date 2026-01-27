@@ -87,12 +87,13 @@ class GammaClient(ThreadLocalSessionMixin):
 
     DEFAULT_HOST = "https://gamma-api.polymarket.com"
 
-    # Supported coins and their slug prefixes
+    # Supported coins/assets and their slug prefixes
     COIN_SLUGS = {
         "BTC": "btc-updown-15m",
         "ETH": "eth-updown-15m",
         "SOL": "sol-updown-15m",
         "XRP": "xrp-updown-15m",
+        "MSTR": "mstr-updown-15m",  # MicroStrategy stock (tracks BTC)
     }
 
     def __init__(self, host: str = None, timeout: int = 10):
