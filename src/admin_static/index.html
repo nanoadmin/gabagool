@@ -3,65 +3,110 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Money House Admin</title>
+    <title>Money House Time Admin</title>
     <link rel="icon" href="/static/favicon.svg" type="image/svg+xml" />
     <link rel="stylesheet" href="/static/styles.css" />
   </head>
   <body>
     <div class="shell">
-      <div id="statusBanner" class="status-banner">Loading live dashboard…</div>
+      <div id="statusBanner" class="status-banner __SERVER_STATUS_CLASS__">__SERVER_STATUS_TEXT__</div>
+
       <header class="hero">
-        <div>
+        <div class="hero-copy-block">
           <p class="eyebrow">Money House</p>
-          <h1>Paper Trading Admin</h1>
+          <h1>Time Admin Screen</h1>
           <p class="hero-copy">
-            Fake-money arbitrage desk built from the Gabagool fork. Live market reads when available, no wallet keys,
-            and no real order execution.
+            Clock-driven control surface for scan cadence, market windows, fake settlements, and test runs.
+            Everything here stays paper-only.
           </p>
         </div>
-        <div class="hero-actions">
-          <button id="scanButton">Run Scan</button>
-          <button id="testButton" class="secondary">Run Tests</button>
-          <button id="resetButton" class="ghost">Reset Bankroll</button>
+
+        <div class="hero-side">
+          <div class="clock-tower">
+            <p class="panel-kicker">Control Clock</p>
+            <div id="heroClockPrimary" class="clock-primary">__SERVER_HERO_CLOCK_PRIMARY__</div>
+            <div id="heroClockSecondary" class="clock-secondary">UTC control clock</div>
+            <p id="heroClockMeta" class="clock-meta">__SERVER_HERO_CLOCK_META__</p>
+          </div>
+
+          <div class="hero-actions">
+            <form id="scanForm" method="post" action="/actions/scan">
+              <button id="scanButton" type="submit">Run Scan</button>
+            </form>
+            <form id="testForm" method="post" action="/actions/tests">
+              <button id="testButton" class="secondary" type="submit">Run Tests</button>
+            </form>
+            <form id="resetForm" method="post" action="/actions/reset">
+              <button id="resetButton" class="ghost" type="submit">Reset Bankroll</button>
+            </form>
+          </div>
         </div>
       </header>
 
-      <section class="summary-grid" id="summaryGrid">__SERVER_SUMMARY__</section>
+      <section id="tempoGrid" class="tempo-grid">__SERVER_TEMPO_CARDS__</section>
 
-      <section class="panel-grid">
-        <article class="panel wide">
+      <section class="layout-grid layout-top">
+        <article class="panel panel-wide">
           <div class="panel-header">
             <div>
-              <p class="panel-kicker">Markets</p>
-              <h2>Current Opportunity Board</h2>
+              <p class="panel-kicker">Timeline</p>
+              <h2>Time Rail</h2>
             </div>
             <span id="serviceBadge" class="badge __SERVER_BADGE_CLASS__">__SERVER_BADGE_TEXT__</span>
           </div>
-          <div id="marketBoard" class="market-board">__SERVER_MARKETS__</div>
+
+          <div id="timelineFilters" class="filter-row">
+            <button class="pill is-active" data-timeline-filter="all">All</button>
+            <button class="pill" data-timeline-filter="upcoming">Upcoming</button>
+            <button class="pill" data-timeline-filter="recent">Recent</button>
+            <button class="pill" data-timeline-filter="tests">Tests</button>
+          </div>
+
+          <div id="timeRail" class="time-rail">__SERVER_TIME_RAIL__</div>
         </article>
 
         <article class="panel">
           <div class="panel-header">
             <div>
-              <p class="panel-kicker">Health</p>
-              <h2>Runtime</h2>
+              <p class="panel-kicker">Runtime</p>
+              <h2>Cadence Facts</h2>
             </div>
           </div>
           <dl id="runtimeStats" class="stats-list">__SERVER_RUNTIME__</dl>
         </article>
       </section>
 
-      <section class="panel-grid">
+      <section class="layout-grid layout-mid">
+        <article class="panel panel-wide">
+          <div class="panel-header">
+            <div>
+              <p class="panel-kicker">Windows</p>
+              <h2>Market Close Queue</h2>
+            </div>
+          </div>
+
+          <div id="marketFilters" class="filter-row">
+            <button class="pill is-active" data-market-filter="all">All</button>
+            <button class="pill" data-market-filter="live">Live</button>
+            <button class="pill" data-market-filter="demo">Demo</button>
+            <button class="pill" data-market-filter="edge">Edge</button>
+          </div>
+
+          <div id="marketBoard" class="market-board">__SERVER_MARKETS__</div>
+        </article>
+
         <article class="panel">
           <div class="panel-header">
             <div>
-              <p class="panel-kicker">Open</p>
-              <h2>Active Positions</h2>
+              <p class="panel-kicker">Queue</p>
+              <h2>Settlement Deck</h2>
             </div>
           </div>
-          <div id="openPositions" class="table-wrap">__SERVER_OPEN_POSITIONS__</div>
+          <div id="openPositions" class="card-stack">__SERVER_OPEN_POSITIONS__</div>
         </article>
+      </section>
 
+      <section class="layout-grid layout-bottom">
         <article class="panel">
           <div class="panel-header">
             <div>
@@ -69,16 +114,14 @@
               <h2>Recent Results</h2>
             </div>
           </div>
-          <div id="closedPositions" class="table-wrap">__SERVER_CLOSED_POSITIONS__</div>
+          <div id="closedPositions" class="card-stack">__SERVER_CLOSED_POSITIONS__</div>
         </article>
-      </section>
 
-      <section class="panel-grid">
         <article class="panel">
           <div class="panel-header">
             <div>
               <p class="panel-kicker">Tests</p>
-              <h2>Latest Test Runs</h2>
+              <h2>Pulse Checks</h2>
             </div>
           </div>
           <div id="testRuns" class="stack">__SERVER_TEST_RUNS__</div>
@@ -87,8 +130,8 @@
         <article class="panel">
           <div class="panel-header">
             <div>
-              <p class="panel-kicker">Logs</p>
-              <h2>Service Journal</h2>
+              <p class="panel-kicker">Journal</p>
+              <h2>Operator Feed</h2>
             </div>
           </div>
           <div id="logFeed" class="stack">__SERVER_LOGS__</div>
@@ -97,7 +140,10 @@
 
       <noscript>
         <section class="panel">
-          <p class="empty">JavaScript is disabled. The server-rendered snapshot is shown above, but live refresh and controls are unavailable.</p>
+          <p class="empty">
+            JavaScript is disabled. The server-rendered time screen is shown above, but live countdowns and
+            operator controls are unavailable.
+          </p>
         </section>
       </noscript>
     </div>
@@ -105,4 +151,4 @@
     <script>window.__INITIAL_DASHBOARD__ = __INITIAL_DASHBOARD_JSON__;</script>
     <script src="/static/app.js" defer></script>
   </body>
-  </html>
+</html>
