@@ -1,0 +1,17 @@
+[Unit]
+Description=Money House paper-trading admin dashboard
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi
+Group=pi
+WorkingDirectory=/home/pi/gabagool
+EnvironmentFile=-/home/pi/gabagool/.env
+ExecStart=/home/pi/gabagool/.venv/bin/uvicorn src.admin_app:app --host 127.0.0.1 --port 18111
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

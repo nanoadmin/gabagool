@@ -1,20 +1,29 @@
 # Gabagool Bot
 
-**Polymarket Arbitrage Trading Bot**
+**Money House Paper Trading Dashboard**
 
-*Version 1.0 - Hybrid Build*
-*Created: 2026-01-26*
+*Version 1.1 - Paper-only admin build*
+*Updated: 2026-04-16*
 
 ---
 
 ## Overview
 
-Gabagool is a Polymarket arbitrage bot that guarantees profit by buying both YES and NO shares when each side becomes temporarily cheap. If combined cost < $1.00, profit is locked regardless of outcome.
+This fork keeps the market-scanning idea from the original Gabagool project, but the deployed app is now a fake-money admin console. It reads market metadata, simulates paired YES/NO arbitrage with a virtual bankroll, records paper positions, and exposes a protected dashboard plus JSON API.
 
-### Core Concept
+What changed:
+- No wallet keys are required for the dashboard runtime
+- No real order placement is used in the deployed service
+- A FastAPI admin app serves the UI and API
+- Unit test results are stored and shown in the admin page
+- If live Gamma data is unavailable, the app falls back to demo market data so the UI still works
+
+The original live-trading code remains in the repo for reference, but the `money.daveshouse.xyz` deployment is paper-only.
+
+### Paper Trading Concept
 
 ```
-Buy YES when cheap -> Buy NO when cheap -> Pair cost < $1.00 -> Guaranteed profit
+Find cheap YES/NO pair -> Buy both with fake money -> Track expected payout -> Settle to virtual balance
 ```
 
 **Example:**
@@ -23,6 +32,16 @@ Buy YES when cheap -> Buy NO when cheap -> Pair cost < $1.00 -> Guaranteed profi
 - Pair cost: $0.93
 - Payout: $1.00
 - Profit: $0.07 (7.5% per pair)
+
+### Admin Dashboard
+
+The dashboard includes:
+- fake bankroll, equity, realized and open P&L
+- current 15-minute market opportunity board
+- open and settled paper positions
+- service journal/logs
+- latest unit test results
+- operator controls for scan now, run tests, and reset bankroll
 
 ### Target Markets
 
@@ -35,32 +54,32 @@ Buy YES when cheap -> Buy NO when cheap -> Pair cost < $1.00 -> Guaranteed profi
 
 ## Architecture
 
-This bot uses a **hybrid approach**, combining the best components from 4 proven repositories:
+This fork has two runtime paths:
 
-| Component | Source | Purpose |
-|-----------|--------|---------|
-| Base Infrastructure | discountry/polymarket-trading-bot | API client, wallet, order execution |
-| Position Tracker | Trust412/Polymarket-spike-bot-v1 | Thread-safe tracking, time limits |
-| Gas Optimizer | warproxxx/poly-maker | Position merging, stats tracking |
-| Risk Manager | lorine93s/polymarket-market-maker-bot | Pre-trade validation, auto-redeem |
+1. Legacy live bot code
+   Present for reference and future strategy work.
 
----
+2. Money House paper dashboard
+   The deployed path for `money.daveshouse.xyz`.
+
+The paper dashboard uses:
+- `src/gamma_client.py` for public market discovery
+- `src/paper_service.py` for fake-money state, scans, settlement, and test execution
+- `src/admin_app.py` for the FastAPI API and static dashboard hosting
+- `src/admin_static/` for the admin UI
 
 ## Project Structure
 
+---
+
 ```
 gabagool/
-├── config/           # Configuration files
-├── src/              # Core source code
-├── strategies/       # Trading strategies
-├── tests/            # Unit and live tests
-├── backtest/         # Paper trading and simulation
-├── research/         # Analysis notebooks
-├── docs/             # Documentation
-├── scripts/          # Utility scripts
-├── logs/             # Runtime logs
-├── samples/          # Reference repositories
-└── requirements.txt  # Dependencies
+├── config/                  # Legacy bot config and paper env example
+├── deploy/                  # Systemd + Caddy deployment snippets
+├── src/                     # Bot, paper service, FastAPI app, static admin UI
+├── tests/                   # Unit and legacy live tests
+├── backtest/                # Legacy paper/simulation scripts
+└── requirements.txt         # Python dependencies
 ```
 
 ---
@@ -70,36 +89,31 @@ gabagool/
 ```bash
 # 1. Setup environment
 cd gabagool
-python -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
+make setup
 
-# 2. Configure
-cp config/.env.example config/.env
-# Edit config/.env with your wallet keys
+# 2. Optional paper settings
+cp config/paper_dashboard.env.example .env
 
-# 3. Test connection
-python -m src.main --dry-run
+# 3. Run the admin app locally
+make dashboard
 
-# 4. Run live
-python -m src.main
+# 4. Open the UI
+# http://127.0.0.1:18111
 ```
 
 ---
 
-## Configuration
+## Paper Dashboard Configuration
 
-See [docs/PARAMETERS.md](docs/PARAMETERS.md) for full parameter documentation.
+The paper dashboard reads these environment variables:
 
-### Key Parameters
-
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `yes_threshold` | 0.48 | Buy YES if price below |
-| `no_threshold` | 0.48 | Buy NO if price below |
-| `max_combined_cost` | 0.97 | Max total for both sides |
-| `min_profit_margin` | 0.02 | Minimum profit to enter |
-| `max_concurrent_arbitrages` | 3 | Max simultaneous positions |
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `MONEY_PORT` | `18111` | Local admin port |
+| `MONEY_SCAN_INTERVAL` | `15` | Seconds between scans |
+| `MONEY_STARTING_BALANCE` | `1000` | Starting fake bankroll |
+| `MONEY_MAX_TRADE_STAKE` | `120` | Max fake stake per opportunity |
+| `MONEY_TARGET_ASSETS` | `BTC,ETH,SOL` | Assets to scan |
 
 ---
 
@@ -109,15 +123,18 @@ See [docs/PARAMETERS.md](docs/PARAMETERS.md) for full parameter documentation.
 - [SETUP.md](docs/SETUP.md) - Installation guide
 - [PARAMETERS.md](docs/PARAMETERS.md) - Configuration reference
 - [RUNBOOK.md](docs/RUNBOOK.md) - Operations guide
+- [deploy/systemd/money-house.service](deploy/systemd/money-house.service) - Example systemd unit
+- [deploy/Caddyfile.money-house](deploy/Caddyfile.money-house) - Example Caddy site block
 
 ---
 
 ## Safety
 
 - Never delete data or code
-- Use dedicated trading wallet
-- Start with small capital ($100)
-- Monitor first trades closely
+- The deployed dashboard is fake-money only
+- Do not provide wallet keys to the paper dashboard
+- Live bot commands are still in the repo but are not used for `money.daveshouse.xyz`
+- Treat `make run-live` as separate legacy functionality
 
 ---
 

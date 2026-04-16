@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Money House Admin</title>
+    <link rel="icon" href="/static/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <div class="shell">
+      <header class="hero">
+        <div>
+          <p class="eyebrow">Money House</p>
+          <h1>Paper Trading Admin</h1>
+          <p class="hero-copy">
+            Fake-money arbitrage desk built from the Gabagool fork. Live market reads when available, no wallet keys,
+            and no real order execution.
+          </p>
+        </div>
+        <div class="hero-actions">
+          <button id="scanButton">Run Scan</button>
+          <button id="testButton" class="secondary">Run Tests</button>
+          <button id="resetButton" class="ghost">Reset Bankroll</button>
+        </div>
+      </header>
+
+      <section class="summary-grid" id="summaryGrid"></section>
+
+      <section class="panel-grid">
+        <article class="panel wide">
+          <div class="panel-header">
+            <div>
+              <p class="panel-kicker">Markets</p>
+              <h2>Current Opportunity Board</h2>
+            </div>
+            <span id="serviceBadge" class="badge">Loading</span>
+          </div>
+          <div id="marketBoard" class="market-board"></div>
+        </article>
+
+        <article class="panel">
+          <div class="panel-header">
+            <div>
+              <p class="panel-kicker">Health</p>
+              <h2>Runtime</h2>
+            </div>
+          </div>
+          <dl id="runtimeStats" class="stats-list"></dl>
+        </article>
+      </section>
+
+      <section class="panel-grid">
+        <article class="panel">
+          <div class="panel-header">
+            <div>
+              <p class="panel-kicker">Open</p>
+              <h2>Active Positions</h2>
+            </div>
+          </div>
+          <div id="openPositions" class="table-wrap"></div>
+        </article>
+
+        <article class="panel">
+          <div class="panel-header">
+            <div>
+              <p class="panel-kicker">Settled</p>
+              <h2>Recent Results</h2>
+            </div>
+          </div>
+          <div id="closedPositions" class="table-wrap"></div>
+        </article>
+      </section>
+
+      <section class="panel-grid">
+        <article class="panel">
+          <div class="panel-header">
+            <div>
+              <p class="panel-kicker">Tests</p>
+              <h2>Latest Test Runs</h2>
+            </div>
+          </div>
+          <div id="testRuns" class="stack"></div>
+        </article>
+
+        <article class="panel">
+          <div class="panel-header">
+            <div>
+              <p class="panel-kicker">Logs</p>
+              <h2>Service Journal</h2>
+            </div>
+          </div>
+          <div id="logFeed" class="stack"></div>
+        </article>
+      </section>
+    </div>
+
+    <script src="/static/app.js" defer></script>
+  </body>
+  </html>

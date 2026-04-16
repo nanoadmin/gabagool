@@ -1,0 +1,7 @@
+money.daveshouse.xyz {
+	encode zstd gzip
+	basic_auth {
+		dave REPLACE_WITH_CADDY_BCRYPT_HASH
+	}
+	reverse_proxy 127.0.0.1:18111
+}

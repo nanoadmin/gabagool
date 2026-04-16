@@ -8,7 +8,7 @@
 #   make test      - Run unit tests
 #   make shell     - Open shell with venv activated
 
-.PHONY: setup run run-live test shell clean help
+.PHONY: setup run run-live dashboard dashboard-dev test test-json shell clean help
 
 # Default Python
 PYTHON := python3
@@ -28,8 +28,10 @@ help:
 	@echo ""
 	@echo "  $(YELLOW)make setup$(NC)      - Create virtual environment and install dependencies"
 	@echo "  $(YELLOW)make run$(NC)        - Run bot in dry-run mode (safe)"
+	@echo "  $(YELLOW)make dashboard$(NC)  - Run the Money House paper-trading admin app"
 	@echo "  $(YELLOW)make run-live$(NC)   - Run bot in LIVE mode (executes real trades!)"
 	@echo "  $(YELLOW)make test$(NC)       - Run unit tests"
+	@echo "  $(YELLOW)make test-json$(NC)  - Run unit tests and write JSON report"
 	@echo "  $(YELLOW)make test-live$(NC)  - Run live API tests (requires credentials)"
 	@echo "  $(YELLOW)make shell$(NC)      - Open shell with venv activated"
 	@echo "  $(YELLOW)make clean$(NC)      - Remove venv and cache files"
@@ -74,6 +76,14 @@ run-debug: $(VENV)/bin/activate
 	@echo "$(YELLOW)Running Gabagool Bot (DEBUG mode)...$(NC)"
 	$(VENV_BIN)/python -m src.main --dry-run --log-level DEBUG
 
+dashboard: $(VENV)/bin/activate
+	@echo "$(GREEN)Running Money House paper dashboard...$(NC)"
+	$(VENV_BIN)/uvicorn src.admin_app:app --host 127.0.0.1 --port $${MONEY_PORT:-18111}
+
+dashboard-dev: $(VENV)/bin/activate
+	@echo "$(YELLOW)Running Money House paper dashboard with reload...$(NC)"
+	$(VENV_BIN)/uvicorn src.admin_app:app --reload --host 127.0.0.1 --port $${MONEY_PORT:-18111}
+
 # =============================================================================
 # TEST
 # =============================================================================
@@ -81,6 +91,10 @@ run-debug: $(VENV)/bin/activate
 test: $(VENV)/bin/activate
 	@echo "$(GREEN)Running unit tests...$(NC)"
 	$(PYTEST) tests/unit/ -v
+
+test-json: $(VENV)/bin/activate
+	@echo "$(GREEN)Running unit tests with JSON report...$(NC)"
+	$(PYTEST) tests/unit/ -q --json-report --json-report-file=data/test-report.json
 
 test-live: $(VENV)/bin/activate
 	@echo "$(YELLOW)Running live API tests...$(NC)"
