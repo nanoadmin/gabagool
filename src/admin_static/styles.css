@@ -59,6 +59,33 @@ button:disabled {
   padding: 1.5rem 0 3rem;
 }
 
+.status-banner {
+  margin-bottom: 1rem;
+  padding: 0.85rem 1rem;
+  border-radius: 18px;
+  background: rgba(15, 118, 110, 0.12);
+  color: var(--accent);
+  border: 1px solid rgba(15, 118, 110, 0.16);
+  box-shadow: var(--shadow);
+}
+
+.status-banner.warn {
+  background: rgba(199, 107, 47, 0.14);
+  color: var(--accent-warm);
+  border-color: rgba(199, 107, 47, 0.2);
+}
+
+.status-banner.danger {
+  background: rgba(166, 60, 50, 0.12);
+  color: var(--accent-danger);
+  border-color: rgba(166, 60, 50, 0.2);
+}
+
+.status-banner.ok {
+  background: rgba(15, 118, 110, 0.12);
+  color: var(--accent);
+}
+
 .hero,
 .panel,
 .summary-card {

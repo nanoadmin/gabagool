@@ -9,6 +9,7 @@
   </head>
   <body>
     <div class="shell">
+      <div id="statusBanner" class="status-banner">Loading live dashboard…</div>
       <header class="hero">
         <div>
           <p class="eyebrow">Money House</p>
@@ -25,7 +26,7 @@
         </div>
       </header>
 
-      <section class="summary-grid" id="summaryGrid"></section>
+      <section class="summary-grid" id="summaryGrid">__SERVER_SUMMARY__</section>
 
       <section class="panel-grid">
         <article class="panel wide">
@@ -34,9 +35,9 @@
               <p class="panel-kicker">Markets</p>
               <h2>Current Opportunity Board</h2>
             </div>
-            <span id="serviceBadge" class="badge">Loading</span>
+            <span id="serviceBadge" class="badge __SERVER_BADGE_CLASS__">__SERVER_BADGE_TEXT__</span>
           </div>
-          <div id="marketBoard" class="market-board"></div>
+          <div id="marketBoard" class="market-board">__SERVER_MARKETS__</div>
         </article>
 
         <article class="panel">
@@ -46,7 +47,7 @@
               <h2>Runtime</h2>
             </div>
           </div>
-          <dl id="runtimeStats" class="stats-list"></dl>
+          <dl id="runtimeStats" class="stats-list">__SERVER_RUNTIME__</dl>
         </article>
       </section>
 
@@ -58,7 +59,7 @@
               <h2>Active Positions</h2>
             </div>
           </div>
-          <div id="openPositions" class="table-wrap"></div>
+          <div id="openPositions" class="table-wrap">__SERVER_OPEN_POSITIONS__</div>
         </article>
 
         <article class="panel">
@@ -68,7 +69,7 @@
               <h2>Recent Results</h2>
             </div>
           </div>
-          <div id="closedPositions" class="table-wrap"></div>
+          <div id="closedPositions" class="table-wrap">__SERVER_CLOSED_POSITIONS__</div>
         </article>
       </section>
 
@@ -80,7 +81,7 @@
               <h2>Latest Test Runs</h2>
             </div>
           </div>
-          <div id="testRuns" class="stack"></div>
+          <div id="testRuns" class="stack">__SERVER_TEST_RUNS__</div>
         </article>
 
         <article class="panel">
@@ -90,11 +91,18 @@
               <h2>Service Journal</h2>
             </div>
           </div>
-          <div id="logFeed" class="stack"></div>
+          <div id="logFeed" class="stack">__SERVER_LOGS__</div>
         </article>
       </section>
+
+      <noscript>
+        <section class="panel">
+          <p class="empty">JavaScript is disabled. The server-rendered snapshot is shown above, but live refresh and controls are unavailable.</p>
+        </section>
+      </noscript>
     </div>
 
+    <script>window.__INITIAL_DASHBOARD__ = __INITIAL_DASHBOARD_JSON__;</script>
     <script src="/static/app.js" defer></script>
   </body>
   </html>

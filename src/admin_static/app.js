@@ -9,6 +9,7 @@ const serviceBadge = document.getElementById("serviceBadge");
 const scanButton = document.getElementById("scanButton");
 const testButton = document.getElementById("testButton");
 const resetButton = document.getElementById("resetButton");
+const statusBanner = document.getElementById("statusBanner");
 
 const currency = new Intl.NumberFormat("en-US", {
   style: "currency",
@@ -32,6 +33,11 @@ async function request(path, options = {}) {
     throw new Error(body || `Request failed: ${response.status}`);
   }
   return response.json();
+}
+
+function setStatus(message, tone = "ok") {
+  statusBanner.textContent = message;
+  statusBanner.className = `status-banner ${tone}`;
 }
 
 function renderSummary(summary) {
@@ -206,9 +212,11 @@ async function refresh() {
   try {
     const snapshot = await request("/api/dashboard");
     render(snapshot);
+    setStatus("Live dashboard connected.", "ok");
   } catch (error) {
     serviceBadge.textContent = "Offline";
     serviceBadge.className = "badge danger";
+    setStatus("Live refresh failed. Keeping the last rendered snapshot on screen.", "warn");
     console.error(error);
   }
 }
@@ -247,6 +255,11 @@ resetButton.addEventListener("click", async () => {
     resetButton.disabled = false;
   }
 });
+
+if (window.__INITIAL_DASHBOARD__) {
+  render(window.__INITIAL_DASHBOARD__);
+  setStatus("Loaded embedded snapshot. Connecting live updates…", "ok");
+}
 
 refresh();
 window.setInterval(refresh, 10000);
